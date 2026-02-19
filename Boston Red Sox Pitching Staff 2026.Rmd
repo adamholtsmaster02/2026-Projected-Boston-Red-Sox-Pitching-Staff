@@ -1,0 +1,146 @@
+---
+title: "Red Sox 2026 Projected Rotation"
+author: "Adam Holtsmaster"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(janitor)
+library(gt)
+
+df <- read_csv("~/Desktop/Indy/Red Sox Pitching Staff.csv") %>%
+  clean_names()
+
+
+```
+
+```{r}
+pitchers <- df %>%
+  transmute(
+    player = name,
+    position = pos,
+    ip = ip,
+    era = era,
+    fip = fip,
+    k_per_9 = k_9,
+    bb_per_9 = bb_9,
+    hr_per_9 = hr_9,
+    war = war,
+  ) %>%
+   mutate(
+    health = "Healthy",
+    dom = k_per_9 - bb_per_9
+  )
+```
+
+```{r}
+pitchers <- pitchers %>%
+  mutate(
+    sp_score = scale(ip)[,1] * 0.45 + scale(war)[,1] * 0.35 - scale(fip)[,1] * 0.20,
+    rp_score = scale(dom)[,1] * 0.45 + scale(war)[,1] * 0.30 - scale(fip)[,1] * 0.25
+  )
+
+```
+
+```{r}
+
+eligible <- pitchers %>% filter(health == "Healthy")
+
+rotation <- eligible %>%
+  filter(position %in% c("SP", "SP/RP")) %>%
+  arrange(desc(sp_score), desc(ip), desc(war)) %>%
+  slice_head(n = 5) %>%
+  mutate(role = paste0("SP", row_number()))
+
+bullpen <- eligible %>%
+  filter(!player %in% rotation$player) %>%
+  filter(position %in% c("RP", "SP/RP")) %>%
+  arrange(desc(rp_score), desc(dom), desc(war)) %>%
+  slice_head(n = 8) %>%
+  mutate(
+    role = case_when(
+      row_number() == 1 ~ "Closer",
+      row_number() %in% 2:3 ~ "Setup",
+      row_number() %in% 4:6 ~ "Middle Relief",
+      TRUE ~ "Long Relief"
+    )
+  )
+
+staff_13 <- bind_rows(rotation, bullpen) %>%
+  select(player, role)
+
+
+```
+
+```{r}
+
+gt_roster <- pitchers %>%
+  left_join(staff_13, by = "player") %>%
+  mutate(
+    roster_group = case_when(
+      player %in% rotation$player ~ "Starters",
+      player %in% bullpen$player  ~ "Bullpen",
+      TRUE                        ~ "Did Not Make Opening Day Roster"
+    ),
+    role = ifelse(is.na(role), "-", role)
+  ) %>%
+  select(
+    roster_group, role, player, position, health,
+    ip, era, fip, k_per_9, bb_per_9, hr_per_9, dom, war
+  ) %>%
+  arrange(
+    factor(roster_group, levels = c("Starters","Bullpen","Did Not Make Opening Day Roster")),
+    # within each group, sort cleanly by value
+    desc(war), desc(ip)
+  )
+
+```
+
+```{r}
+gt_tbl <- gt_roster %>%
+  gt(groupname_col = "roster_group") %>%
+  cols_label(
+    role = "Role",
+    player = "Pitcher",
+    position = "Position",
+    health = "Health",
+    ip = "IP",
+    era = "ERA",
+    fip = "FIP",
+    k_per_9 = "K/9",
+    bb_per_9 = "BB/9",
+    hr_per_9 = "HR/9",
+    dom = "K-BB/9",
+    war = "WAR"
+  ) %>%
+  fmt_number(columns = c(era, fip), decimals = 2) %>%
+  fmt_number(columns = c(k_per_9, bb_per_9, hr_per_9, dom), decimals = 1) %>%
+  fmt_number(columns = c(war), decimals = 2) %>%
+  cols_align(align = "center", columns = c(position, role, health)) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_row_groups()
+  ) %>%
+  tab_style(
+    style = cell_text(color = "red", weight = "bold"),
+    locations = cells_body(
+      rows = health != "Healthy",
+      columns = health
+    )
+  ) %>%
+  tab_header(
+    title = md("**Boston Red Sox — Projected 2026 Pitching Staff (Opening Day)**"),
+    subtitle = "5 Starters • 8 Relievers • Injured/Depth Listed Below"
+  ) %>%
+  opt_row_striping() %>%
+  opt_table_outline()
+
+gt_tbl
+```
