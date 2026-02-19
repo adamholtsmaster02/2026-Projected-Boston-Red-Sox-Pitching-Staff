@@ -1,6 +1,3 @@
-Here’s a **short, clean, copy-paste version** for GitHub:
-
----
 
 # Boston Red Sox 2026 Pitching Staff Projection (R)
 
